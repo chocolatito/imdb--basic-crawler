@@ -6,4 +6,4 @@ movie_to_look_for = [
 ]
 if __name__ == "__main__":
     crawler_object = Crawler(movie_to_look_for)
-    crawler_object.crawl()
+    crawler_object.main()

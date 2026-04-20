@@ -98,7 +98,7 @@ class Crawler(ParserMixin):
         except Exception as e:
             self.logger.error(self.SCRAPE_ERROR(id=iteration_id, e=e))
 
-    def sanitise_input(self) -> None:
+    def sanitise_input(self) -> list:
         """
         """
         if not isinstance(self.movie_to_look_for, list):
@@ -114,45 +114,38 @@ class Crawler(ParserMixin):
             if not isinstance(year, int):
                 raise Exception(self.YEAR_INPUT_ERROR(year=year))
 
+    def _crawl_from_browser(self) -> list:
+        """
+        """
+        cookies = []
+        try:
+            try:
+                self.logger.info("Starting the driver")
+                self.start_driver(chrome_driver_path=constants.CHROME_DRIVER_PATH)
+                self.logger.info(f"Accessing {self.BASE_URL}")
+                self.driver.get(self.BASE_URL)
+                self.wait_for_xpath(self.SUCCESS_XPATH)
+            except Exception as e:
+                raise Exception(self.ACCESS_ERROR(url=self.BASE_URL, e=e))
+
+            self.logger.info("Getting cookies ...")
+            try:
+                cookies = self.get_cookies(cookie_names=["aws-waf-token"])
+                self.logger.info("Cookies obtained")
+                return cookies
+            except Exception as e:
+                raise Exception(self.COOKIE_ERROR(e=e))
+        except Exception as e:
+            self.logger.critical(e)
+            return cookies
+        finally:
+            self.quit_driver()
+
     def crawl(self) -> None:
         """
         """
-        self.logger.info(f"Start {self.CRAWLER_NAME}")
-        if not os.path.exists(constants.CHROME_DRIVER_PATH):
-            self.logger.critical("CHROME_DRIVER_PATH DOES NOT EXIST")
+        if not (cookies := self._crawl_from_browser()):
             return
-        if not os.path.exists(constants.OUTPUT_DIR):
-            self.logger.critical("OUTPUT_DIR DOES NOT EXIST")
-            return
-
-        self.logger.info("Sanitizing the INPUT ...")
-        try:
-            self.sanitise_input()
-        except Exception as e:
-            self.logger.critical(e)
-            return
-        self.logger.info("INPUT sanitized")
-
-        try:
-            self.logger.info("Starting the driver")
-            self.start_driver(chrome_driver_path=constants.CHROME_DRIVER_PATH)
-            self.logger.info(f"Accessing {self.BASE_URL}")
-            self.driver.get(self.BASE_URL)
-            self.wait_for_xpath(self.SUCCESS_XPATH)
-        except Exception as e:
-            self.logger.critical(self.ACCESS_ERROR(url=self.BASE_URL, e=e))
-            self.quit_driver()
-            return
-
-        self.logger.info("Getting cookies ...")
-        try:
-            cookies = self.get_cookies(cookie_names=["aws-waf-token"])
-        except Exception as e:
-            self.logger.critical(self.COOKIE_ERROR(e=e))
-            return
-        finally:
-            self.quit_driver()
-        self.logger.info("Cookies obtained")
 
         try:
             self.logger.info("Starting requests-session ... ")
@@ -169,16 +162,27 @@ class Crawler(ParserMixin):
             for index, input_dict in enumerate(self.movie_to_look_for, 1):
                 iteration_id = f"{index}/{total_titles}"
                 executor.submit(self.paralell_coller, iteration_id, input_dict)
-        if self.title_result == []:
-            self.logger.critical("NO_RESULTS")
-            return
-        total_results = len(self.title_result)
-        if total_results == total_titles:
-            self.logger.info("ALL TITLES OBTAINED RESULTS !!!")
-        else:
-            missing = total_titles-total_results
-            self.logger.info(f"OBTAINED RESULTS: {total_results}/{total_titles}")
-            self.logger.warning(f"MISSING TITLES:   {missing}")
+
+    def _pre_crawling(self) -> bool:
+        """
+        """
+        self.logger.info("Checking DIRs ...")
+        if not os.path.exists(constants.CHROME_DRIVER_PATH):
+            self.logger.critical("CHROME_DRIVER_PATH DOES NOT EXIST")
+            return False
+        if not os.path.exists(constants.OUTPUT_DIR):
+            self.logger.critical("OUTPUT_DIR DOES NOT EXIST")
+            return False
+
+        self.logger.info("Sanitizing the INPUT ...")
+        try:
+            self.sanitise_input()
+        except Exception as e:
+            self.logger.critical(e)
+            return False
+        return True
+
+    def _save_results(self) -> None:
         self.logger.info("Saving results ... ")
         try:
             file_path = os.path.join(constants.OUTPUT_DIR, "title_result.json")
@@ -186,5 +190,28 @@ class Crawler(ParserMixin):
             self.logger.info(f"Results saved: {file_path}")
         except Exception as e:
             self.logger.critical(self.SAVE_ERROR(e=e))
+            return False
+
+    def main(self) -> None:
+        """
+        """
+        self.logger.info(f"Start {self.CRAWLER_NAME}")
+        if not self._pre_crawling():
+            return
+
+        self.crawl()
+        total_titles = len(self.movie_to_look_for)
+        if self.title_result == []:
+            self.logger.critical("NO_RESULTS")
+            return
+
+        total_results = len(self.title_result)
+        if total_results == total_titles:
+            self.logger.info("ALL TITLES OBTAINED RESULTS !!!")
         else:
-            self.logger.info(f"End {self.CRAWLER_NAME}")
+            missing = total_titles-total_results
+            self.logger.info(f"OBTAINED RESULTS: {total_results}/{total_titles}")
+            self.logger.warning(f"MISSING TITLES:   {missing}")
+
+        self._save_results()
+        self.logger.info(f"End {self.CRAWLER_NAME}")
