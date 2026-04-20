@@ -196,3 +196,5 @@ pyrightconfig.json
 
 *.html
 *.json
+*.toml
+!input.dev.json
